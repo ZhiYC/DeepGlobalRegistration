@@ -11,6 +11,7 @@ from dataloader.transforms import *
 
 from util.pointcloud import get_matching_indices, make_open3d_point_cloud
 from util.file import read_trajectory
+import pickle
 
 
 class IndoorPairDataset(PairDataset):
@@ -165,27 +166,35 @@ class ThreeDMatchTrajectoryDataset(PairDataset):
                          manual_seed, config)
 
     self.root = config.threed_match_dir
+    self.test_overlap_file = config.test_overlap_file
 
     subset_names = open(self.DATA_FILES[phase]).read().split()
     if scene_id is not None:
       subset_names = [subset_names[scene_id]]
-    for sname in subset_names:
-      traj_file = os.path.join(self.root, sname + '-evaluation/gt.log')
-      assert os.path.exists(traj_file)
-      traj = read_trajectory(traj_file)
-      for ctraj in traj:
-        i = ctraj.metadata[0]
-        j = ctraj.metadata[1]
-        T_gt = ctraj.pose
+        
+    with open(self.test_overlap_file,'rb') as f:
+      data = pickle.load(f)
+      for d in data:
+        sname = d['scene_name']
+        if sname not in subset_names:
+          continue
+        assert sname in subset_names,f"scene {sname} is in [{subset_names}]"
+        i = d['pcd0']
+        j = d['pcd1']
+        T_gt = np.eye(4)
+        T_gt[:3,:3] = d['rotation']
+        T_gt[:3,3] = d['translation']
         self.files.append((sname, i, j, T_gt))
-
     self.return_ply_names = return_ply_names
 
+  def __len__(self):
+    return len(self.files)
+  
   def __getitem__(self, pair_index):
-    sname, i, j, T_gt = self.files[pair_index]
-    ply_name0 = os.path.join(self.root, sname, f'cloud_bin_{i}.ply')
-    ply_name1 = os.path.join(self.root, sname, f'cloud_bin_{j}.ply')
-
+    sname, name0, name1, T_gt = self.files[pair_index]
+    ply_name0 = os.path.join(self.root, name0)
+    ply_name1 = os.path.join(self.root, name1)
+    
     if self.return_ply_names:
       return sname, ply_name0, ply_name1, T_gt
 

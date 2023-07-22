@@ -14,6 +14,7 @@ import time
 import torch
 import copy
 import MinkowskiEngine as ME
+import tqdm
 
 sys.path.append('.')
 from model import load_model
@@ -52,10 +53,10 @@ def registration_ransac_based_on_correspondence(pcd0, pcd1, idx0, idx1,
   corres = np.stack((idx0, idx1), axis=1)
   corres = o3d.utility.Vector2iVector(corres)
 
-  result = o3d.registration.registration_ransac_based_on_correspondence(
+  result = o3d.pipelines.registration.registration_ransac_based_on_correspondence(
       pcd0, pcd1, corres, distance_threshold,
-      o3d.registration.TransformationEstimationPointToPoint(False), 4,
-      o3d.registration.RANSACConvergenceCriteria(4000000, num_iterations))
+      o3d.pipelines.registration.TransformationEstimationPointToPoint(False), 4,
+      o3d.pipelines.registration.RANSACConvergenceCriteria(4000000, num_iterations))
 
   return result.transformation
 
@@ -271,8 +272,8 @@ class DeepGlobalRegistration:
     # > Case 0: Weighted Procrustes + Robust Refinement
     wsum_threshold = max(200, len(weights) * 0.05)
     sign = '>=' if wsum >= wsum_threshold else '<'
-    print(f'=> Weighted sum {wsum:.2f} {sign} threshold {wsum_threshold}')
-
+    # print(f'=> Weighted sum {wsum:.2f} {sign} threshold {wsum_threshold}')
+    
     T = np.identity(4)
     if wsum >= wsum_threshold:
       try:
@@ -286,8 +287,8 @@ class DeepGlobalRegistration:
         T[0:3, 0:3] = rot.detach().cpu().numpy()
         T[0:3, 3] = trans.detach().cpu().numpy()
         dgr_time = self.reg_timer.toc()
-        print(f'=> DGR takes {dgr_time:.2} s')
-
+        # print(f'=> DGR takes {dgr_time:.2} s')
+        
       except RuntimeError:
         # Will directly go to Safeguard
         print('###############################################')
@@ -308,12 +309,22 @@ class DeepGlobalRegistration:
                                       2 * self.voxel_size,
                                       num_iterations=80000)
       safeguard_time = self.reg_timer.toc()
-      print(f'=> Safeguard takes {safeguard_time:.2} s')
-
+      # print(f'=> Safeguard takes {safeguard_time:.2} s')
+      
     if self.use_icp:
-      T = o3d.registration.registration_icp(
+      T = o3d.pipelines.registration.registration_icp(
           make_open3d_point_cloud(xyz0),
           make_open3d_point_cloud(xyz1), self.voxel_size * 2, T,
-          o3d.registration.TransformationEstimationPointToPoint()).transformation
+          o3d.pipelines.registration.TransformationEstimationPointToPoint()).transformation
 
-    return T
+    dict_out = {
+      'T': T,
+      'points0': xyz0.detach().cpu().numpy(),
+      'points1': xyz1.detach().cpu().numpy(),
+      'weights': weights.detach().cpu().numpy(),
+      'corrs0': corres_idx0.detach().cpu().numpy(),
+      'corrs1': corres_idx1.detach().cpu().numpy(),
+      'feats0': fcgf_feats0.detach().cpu().numpy(),
+      'feats1': fcgf_feats1.detach().cpu().numpy()
+    }
+    return T,dict_out
